@@ -18,7 +18,7 @@ class UserRegistrationRequestSchema(UserBase):
     @field_validator("email")
     @classmethod
     def validate_email(cls, value: str) -> str:
-        return accounts_validators.email_validator(value)
+        return accounts_validators.validate_email(value)
 
 
 class UserRegistrationResponseSchema(UserBase):
