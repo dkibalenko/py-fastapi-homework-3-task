@@ -19,7 +19,12 @@ from database import (
 )
 from exceptions import BaseSecurityError
 from security.interfaces import JWTAuthManagerInterface
-from schemas import UserRegistrationRequestSchema, UserRegistrationResponseSchema
+from schemas import (
+    UserRegistrationRequestSchema,
+    UserRegistrationResponseSchema,
+    MessageResponseSchema,
+    UserActivationRequestSchema
+)
 
 router = APIRouter()
 
@@ -41,7 +46,8 @@ async def register(
         if db_user:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"A user with this email {user_data.email} already exists."
+                detail=f"A user with this email {user_data.email} "
+                        "already exists."
             )
 
         db_user = UserModel.create(
@@ -63,3 +69,56 @@ async def register(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred during user creation."
         )
+
+
+@router.post("/activate/", response_model=MessageResponseSchema)
+async def activate_account(
+    user_data: UserActivationRequestSchema,
+    db: AsyncSession = Depends(get_db)
+):
+    query = (
+        select(UserModel)
+        .options(joinedload(UserModel.activation_token))
+        .where(UserModel.email == user_data.email)
+    )
+    result = await db.execute(query)
+    db_user = result.scalars().first()
+
+    query = (
+        select(ActivationTokenModel)
+        .where(ActivationTokenModel.user_id == db_user.id)
+    )
+    token_result = await db.execute(query)
+    user_activation_token = token_result.scalar_one_or_none()
+
+    if user_activation_token:
+        expires_at = cast(
+            datetime, user_activation_token.expires_at
+        ).replace(tzinfo=timezone.utc)
+
+    if (
+        not user_activation_token
+        or expires_at < datetime.now(timezone.utc)
+        or user_activation_token.token != user_data.token
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired activation token."
+        )
+
+    if db_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User account is already active."
+        )
+
+    db_user.is_active = True
+    await db.execute(
+        delete(ActivationTokenModel)
+        .where(ActivationTokenModel.token == user_data.token)
+    )
+    await db.commit()
+
+    return MessageResponseSchema(
+        message="User account activated successfully."
+    )
