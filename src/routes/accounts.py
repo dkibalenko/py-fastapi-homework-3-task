@@ -122,3 +122,32 @@ async def activate_account(
     return MessageResponseSchema(
         message="User account activated successfully."
     )
+
+
+@router.post("/password-reset/request/", response_model=MessageResponseSchema)
+async def password_reset_request(
+    user_data: PasswordResetRequestSchema,
+    db: AsyncSession = Depends(get_db)
+) -> MessageResponseSchema:
+    query = (
+        select(UserModel)
+        .where(UserModel.email == user_data.email)
+    )
+    result = await db.execute(query)
+    db_user = result.scalar_one_or_none()
+
+    if db_user and db_user.is_active:
+        await db.execute(
+            delete(PasswordResetTokenModel)
+            .where(PasswordResetTokenModel.user_id == db_user.id)
+        )
+        password_reset_token = PasswordResetTokenModel(user_id=db_user.id)
+        db.add(password_reset_token)
+        await db.commit()
+
+    return MessageResponseSchema(
+        message=(
+            "If you are registered, you will receive "
+            "an email with instructions."
+        )
+    )
