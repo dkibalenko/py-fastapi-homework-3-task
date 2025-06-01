@@ -23,7 +23,8 @@ from schemas import (
     UserRegistrationRequestSchema,
     UserRegistrationResponseSchema,
     MessageResponseSchema,
-    UserActivationRequestSchema
+    UserActivationRequestSchema,
+    PasswordResetRequestSchema
 )
 
 router = APIRouter()
@@ -37,7 +38,7 @@ router = APIRouter()
 async def register(
     user_data: UserRegistrationRequestSchema,
     db: AsyncSession = Depends(get_db)
-):
+) -> UserRegistrationResponseSchema:
     try:
         query = select(UserModel).where(UserModel.email == user_data.email)
         result = await db.execute(query)
@@ -75,14 +76,13 @@ async def register(
 async def activate_account(
     user_data: UserActivationRequestSchema,
     db: AsyncSession = Depends(get_db)
-):
+) -> MessageResponseSchema:
     query = (
         select(UserModel)
-        .options(joinedload(UserModel.activation_token))
         .where(UserModel.email == user_data.email)
     )
     result = await db.execute(query)
-    db_user = result.scalars().first()
+    db_user = result.scalar_one_or_none()
 
     query = (
         select(ActivationTokenModel)
@@ -115,7 +115,7 @@ async def activate_account(
     db_user.is_active = True
     await db.execute(
         delete(ActivationTokenModel)
-        .where(ActivationTokenModel.token == user_data.token)
+        .where(ActivationTokenModel.user_id == db_user.id)
     )
     await db.commit()
 
