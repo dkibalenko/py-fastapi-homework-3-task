@@ -40,5 +40,7 @@ class PasswordResetRequestSchema(BaseModel):
     email: EmailStr
 
 
-# class PasswordResetCompleteRequestSchema(BaseModel):
-#     message: str
+class PasswordResetCompleteRequestSchema(BaseModel):
+    email: EmailStr
+    token: str
+    password: str
