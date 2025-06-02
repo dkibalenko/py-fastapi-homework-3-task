@@ -24,7 +24,8 @@ from schemas import (
     UserRegistrationResponseSchema,
     MessageResponseSchema,
     UserActivationRequestSchema,
-    PasswordResetRequestSchema
+    PasswordResetRequestSchema,
+    PasswordResetCompleteRequestSchema
 )
 
 router = APIRouter()
@@ -150,4 +151,67 @@ async def password_reset_request(
             "If you are registered, you will receive "
             "an email with instructions."
         )
+    )
+
+
+@router.post(
+    "/reset-password/complete/",
+    response_model=MessageResponseSchema
+)
+async def password_reset_complete(
+    user_data: PasswordResetCompleteRequestSchema,
+    db: AsyncSession = Depends(get_db)
+) -> MessageResponseSchema:
+    query = (
+        select(UserModel)
+        .options(joinedload(UserModel.password_reset_token))
+        .where(UserModel.email == user_data.email)
+    )
+    result = await db.execute(query)
+    db_user = result.scalar_one_or_none()
+
+    if not db_user or not db_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email or token."
+        )
+
+    token_obj = db_user.password_reset_token
+
+    token_invalid = (
+        not token_obj or
+        token_obj.token != user_data.token or
+        token_obj.expires_at.replace(tzinfo=timezone.utc) 
+        < datetime.now(timezone.utc)
+    )
+
+    delete_query = (
+        delete(PasswordResetTokenModel)
+        .where(PasswordResetTokenModel.user_id == db_user.id)
+    )
+
+    if token_invalid:
+        if token_obj:
+            await db.execute(delete_query)
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid email or token."
+            )
+
+    try:
+        db_user.password = user_data.password
+        db.add(db_user)
+        await db.execute(delete_query)
+        await db.commit()
+        await db.refresh(db_user)
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while resetting the password."
+        )
+
+    return MessageResponseSchema(
+        message="Password reset successfully."
     )
