@@ -25,7 +25,11 @@ from schemas import (
     MessageResponseSchema,
     UserActivationRequestSchema,
     PasswordResetRequestSchema,
-    PasswordResetCompleteRequestSchema
+    PasswordResetCompleteRequestSchema,
+    UserLoginRequestSchema,
+    UserLoginResponseSchema,
+    TokenRefreshRequestSchema,
+    TokenRefreshResponseSchema
 )
 
 router = APIRouter()
@@ -214,4 +218,60 @@ async def password_reset_complete(
 
     return MessageResponseSchema(
         message="Password reset successfully."
+    )
+
+
+@router.post(
+    "/login/",
+    response_model=UserLoginResponseSchema,
+    status_code=201
+)
+async def login(
+    user_data: UserLoginRequestSchema,
+    db: AsyncSession = Depends(get_db),
+    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager)
+) -> UserLoginResponseSchema:
+    try:
+        query = select(UserModel).where(UserModel.email == user_data.email)
+        result = await db.execute(query)
+        db_user = result.scalar_one_or_none()
+
+        if not db_user or not db_user.verify_password(user_data.password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password."
+            )
+
+        if not db_user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is not activated."
+            )
+
+        refresh_token = jwt_manager.create_refresh_token(
+            data={"sub": db_user.email, "user_id": db_user.id}
+        )
+
+        refresh_token_obj = RefreshTokenModel.create(
+            user_id=db_user.id,
+            days_valid=3,
+            token=refresh_token
+        )
+        db.add(refresh_token_obj)
+        await db.commit()
+
+        access_token = jwt_manager.create_access_token(
+            data={"sub": db_user.email, "user_id": db_user.id}
+        )
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while processing the request."
+        )
+
+    return UserLoginResponseSchema(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer"
     )
