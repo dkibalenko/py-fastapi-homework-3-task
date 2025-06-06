@@ -92,6 +92,12 @@ async def activate_account(
     result = await db.execute(query)
     db_user = result.scalar_one_or_none()
 
+    if not db_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User doesn't exist"
+        )
+
     query = (
         select(ActivationTokenModel)
         .where(ActivationTokenModel.user_id == db_user.id)
