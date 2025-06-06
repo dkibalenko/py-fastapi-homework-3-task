@@ -54,8 +54,9 @@ async def register(
         if db_user:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"A user with this email {user_data.email} "
-                        "already exists."
+                detail=(
+                    f"A user with this email {user_data.email} already exists."
+                )
             )
 
         db_user = UserModel.create(
@@ -72,7 +73,7 @@ async def register(
         await db.refresh(db_user)
 
         return db_user
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred during user creation."
@@ -185,9 +186,9 @@ async def password_reset_complete(
     token_obj = db_user.password_reset_token
 
     token_invalid = (
-        not token_obj or
-        token_obj.token != user_data.token or
-        token_obj.expires_at.replace(tzinfo=timezone.utc) 
+        not token_obj
+        or token_obj.token != user_data.token
+        or token_obj.expires_at.replace(tzinfo=timezone.utc)
         < datetime.now(timezone.utc)
     )
 
@@ -211,7 +212,7 @@ async def password_reset_complete(
         await db.execute(delete_query)
         await db.commit()
         await db.refresh(db_user)
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -265,7 +266,7 @@ async def login(
         access_token = jwt_manager.create_access_token(
             data={"sub": db_user.email, "user_id": db_user.id}
         )
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -289,7 +290,7 @@ async def refresh(
         refresh_token_data = jwt_manager.decode_refresh_token(
             user_data.refresh_token
         )
-    except TokenExpiredError as e:
+    except TokenExpiredError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Token has expired."
