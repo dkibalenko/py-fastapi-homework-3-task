@@ -6,6 +6,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
+from exceptions import TokenExpiredError
 
 from config import get_jwt_auth_manager, get_settings, BaseAppSettings
 from database import (
@@ -18,6 +19,7 @@ from database import (
     RefreshTokenModel
 )
 from exceptions import BaseSecurityError
+from exceptions.security import InvalidTokenError
 from security.interfaces import JWTAuthManagerInterface
 from schemas import (
     UserRegistrationRequestSchema,
@@ -274,4 +276,55 @@ async def login(
         access_token=access_token,
         refresh_token=refresh_token,
         token_type="bearer"
+    )
+
+
+@router.post("/refresh/", response_model=TokenRefreshResponseSchema)
+async def refresh(
+    user_data: TokenRefreshRequestSchema,
+    db: AsyncSession = Depends(get_db),
+    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager)
+) -> TokenRefreshResponseSchema:
+    try:
+        refresh_token_data = jwt_manager.decode_refresh_token(
+            user_data.refresh_token
+        )
+    except TokenExpiredError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token has expired."
+        )
+
+    query = (
+        select(RefreshTokenModel)
+        .where(RefreshTokenModel.token == user_data.refresh_token)
+    )
+    result = await db.execute(query)
+    refresh_token = result.scalar_one_or_none()
+
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not found."
+        )
+
+    query = (
+        select(UserModel)
+        .where(UserModel.id == refresh_token_data["user_id"])
+    )
+    result = await db.execute(query)
+    db_user = result.scalar_one_or_none()
+
+    if not db_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found."
+        )
+
+    access_token = jwt_manager.create_access_token(
+        data={"sub": db_user.email, "user_id": db_user.id}
+    )
+
+    return TokenRefreshResponseSchema(
+        access_token=access_token
     )
